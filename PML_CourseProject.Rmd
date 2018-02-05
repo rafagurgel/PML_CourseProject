@@ -1,0 +1,120 @@
+---
+title: "Wearable data classificator"
+author: "Rafael Gurgel"
+date: "03/02/2018"
+output: html_document
+df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE,message=FALSE)
+library(data.table)
+library(dplyr)
+library(lubridate)
+library(caret)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+```
+
+## Overview
+This report explores a large amouth of data from weareable devices, using them to predict the quality of the exercice's movement as a requirement to complete the Practical Machine Learning course on Coursera. The data is provided by [PUC-RIO](http:/groupware.les.inf.puc-rio.br/har) and divided in 2 groups, 19622 observations of 160 variables for training and other 20 observations as a test. All the code is available on [Github](https://github.com/rafagurgel/PML_CourseProject).
+
+## Data Analysis
+### Pre-process
+```{r}
+training <- fread("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                  na.strings=c("NA"," ","#DIV/0!"))
+testing <- fread("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                 na.strings=c("NA"," ","#DIV/0!"))
+
+training <- training%>%
+    mutate_at(vars(roll_belt:magnet_forearm_z),funs(suppressWarnings(as.double(.))))%>%
+    mutate(user_name = factor(user_name),
+           raw_timestamp_part_1 = factor(raw_timestamp_part_1), 
+           raw_timestamp_part_2 = factor(raw_timestamp_part_2), 
+           cvtd_timestamp = dmy_hm(cvtd_timestamp),
+           num_window = factor(num_window),
+           classe = factor(classe))%>%
+    as_tibble
+
+testing <- testing%>%
+    select(-problem_id)%>%
+    mutate_at(vars(roll_belt:magnet_forearm_z),funs(suppressWarnings(as.double(.))))%>%
+    mutate(user_name = factor(user_name),
+           raw_timestamp_part_1 = factor(raw_timestamp_part_1), 
+           raw_timestamp_part_2 = factor(raw_timestamp_part_2), 
+           cvtd_timestamp = dmy_hm(cvtd_timestamp),
+           num_window = factor(num_window))%>%
+    as_tibble
+```
+
+The first 7 variables isn't relevant for the prediction, so it'll be removed from datasets
+```{r}
+names(training)[1:7]
+training <- training%>%
+    select(-c(V1:num_window))
+testing <- testing%>%
+    select(-c(V1:num_window))
+```
+
+Leaving us with 153 variables (including the variable to be predicted). Many of this variables have NA values, let's check the NA proportion by some thresholds.
+There are 53 variables with some value in every row, so 100 variables have at least one missing value (indeed those variables has over than 97% of their data missing and 6 variables misses all their values as we can see in the figure below).
+
+```{r, echo = FALSE, fig.heigth = 1, fig.align='center'}
+prop <- c(seq(0.975,0.985,by=0.0005),0.99,0.995,1)
+feat<- sapply(prop,(function(x){
+    training%>%
+        select(which(colMeans(is.na(.)) <=x))%>%
+        summarize_all(funs(sum(is.na(.))/n()))%>%
+        length()}))
+qplot(prop,feat)+
+    theme_bw()+
+    ylab('Total of features')+
+    xlab('Max. Missing values proportion')
+```
+
+So, let's remove all this 100 variables and divide the training set in 2 groups with 80/20 ratio: 80% to train the model and the other 20% will be used to select the best model to be applied on the testing set. For reproducible results I'll set the seed based on today's date
+
+```{r}
+# Removing NA
+cols<-training%>%
+    summarize_all(funs(sum(is.na(.))/n()))%>%
+    select(which(. <0.975))%>%
+    colnames%>%
+    as.vector
+training <- training%>%
+    select(cols)
+# Dividing the data
+set.seed(20180205)
+inTrain <- createDataPartition(y=training$classe,p=0.8, list=FALSE)
+```
+## Results
+We fitted a Random Forest model and to reduce the probability of the overfitting, a 5-fold cross validation was performed. Usually Random Forests tend to overfit the data.
+```{r, cache=TRUE}
+fit<-train(classe~.,
+              method="rf",
+              data=training[inTrain,],
+              preProcess = c("center","scale"),
+              trControl = trainControl(method = "cv",number = 5))
+fit
+```
+
+The model looks highly accurate (99%), but as previously discussed about Random Forest overfitting's tendency, it's important validate it. 
+
+```{r}
+pred<-predict(fit,training[-inTrain,])
+class<- training[-inTrain,]$classe
+confusionMatrix(pred,class)
+```
+
+Great! A 99% accuracy, then it looks that there's no overfit in our data. So let's finally predict the testing data leading to the following results.
+
+```{r}
+predict(fit,testing)
+```
+
+Checking the results in the quiz and we've got 100%!
+
+## References
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
