@@ -1,1 +1,1 @@
-HTML Link: [https://github.com/rafagurgel/PML_CourseProject/index.html](https://github.com/rafagurgel/PML_CourseProject/index.html)
+HTML Link: [https://rafagurgel.github.io/PML_CourseProject/index.html](https://rafagurgel.github.io/PML_CourseProject/index.html)
